@@ -1,0 +1,71 @@
+from typing import Dict, Union, Optional, Any
+import hmac
+import hashlib
+from os import getenv, remove
+from pathlib import Path
+import requests
+import logging
+from fbmessenger import BaseMessenger
+
+# Logging toolbox 🔊
+# TODO clean up logs
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+FBME_API_HOST = getenv('FBME_API_HOST', 'fbme_api_host_missing')
+FBME_API_VERSION = getenv('FBME_API_VERSION', 'fbme_api_version_missing')
+
+
+class MessengerExtension(object):
+    def __init__(self):
+        self.session = requests.Session()
+        self.app_secret = getenv('FB_APP_SECRET', 'missing_secret')
+
+    def sign(self, payload: dict) -> dict:
+        params = {}
+        app_secret = getenv('FB_APP_SECRET', 'missing_secret').encode()
+        access_token = getenv(
+            'FB_PAGE_ACCESS_TOKEN', 'missing_page_access_token').encode()
+        params['appsecret_proof'] = hmac.new(
+            app_secret, access_token, hashlib.sha256).hexdigest()
+        params['access_token'] = getenv(
+            "FB_PAGE_ACCESS_TOKEN", 'missing_page_access_token')
+        # TODO check typing
+        params['payload'] = payload
+        return params
+
+    def message(self, recipient: int, message: str) -> dict:
+        message_body = {
+            'recipient': {'id': recipient},
+            'message': {'text': message}
+        }
+        gateway = FBME_API_HOST + '/' + FBME_API_VERSION + '/' + '/me/messages' # str(recipient)  # '/me/messages'
+        # access_token = f'?access_token={getenv("FB_PAGE_ACCESS_TOKEN")}'
+        params = self.sign(message_body)
+        params['recipient'] = recipient
+        response = requests.post(gateway, params=params).json()
+        logger.info(response)
+        return response
+
+    def check_header(self, header: dict) -> Optional[str]:
+        audio_file = header.get('Content-Disposition', 'no_audio_file')
+        if 'mp4' not in audio_file.split('.'):
+            return None
+        return audio_file.split('=')[1]
+
+    def save_audio(self, audioclip: bytes, audioclip_name: str) -> None:
+        temp_folder = Path(getenv('TEMP_FOLDER', default='missing_temp_env_path'))
+        temp_file = temp_folder / audioclip_name
+        with open(temp_file, 'wb') as f:
+            f.write(audioclip)
+        return None
+
+    def remove_audio(self, audioclip_name: str) -> None:
+        temp_folder = Path(getenv('TEMP_FOLDER', default='missing_temp_env_path'))
+        temp_file = temp_folder / audioclip_name
+        return remove(temp_file)
+
+
+fb = BaseMessenger(getenv("FB_PAGE_ACCESS_TOKEN", 'missing_page_access_token'),
+                   app_secret=getenv('FB_APP_SECRET', 'missing_secret'))
+fbext = MessengerExtension()
